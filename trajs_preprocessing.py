@@ -390,10 +390,9 @@ class Processor(object):
         self.pbar = tqdm(total=self.dataset_length)
         num = self.filename.split('-')[1]
         writer = self.build_saving_tfrecords(pred, val,num)
-        already_processed = self.get_already_processed(pred, val, num)
+        already_processed = iter(self.get_already_processed(pred, val, num))
         
-        for dataframe, raw_feature in zip(self.datalist, already_processed):
-            feature =  tf.io.parse_single_example(raw_feature, feature_desc)
+        for dataframe in self.datalist:
             if pred or val:
                 sc_id = dataframe['scenario/id'].numpy()[0]
                 if isinstance(sc_id, bytes):
@@ -401,6 +400,10 @@ class Processor(object):
                 if sc_id not in self.test_scenario_ids:
                     self.pbar.update(1)
                     continue
+
+            raw_feature = next(already_processed)
+        
+            feature =  tf.io.parse_single_example(raw_feature, feature_desc)
 
             dataframe = add_sdc_fields(dataframe)
             self.read_data(dataframe)
