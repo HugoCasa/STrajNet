@@ -367,17 +367,17 @@ class Processor(object):
             self.get_ids(val=False)
             if not os.path.exists(f'{self.save_dir}/test/'):
                 os.makedirs(f'{self.save_dir}/test/')
-            writer = tf.io.TFRecordWriter(f'{self.save_dir}/test/'+f'{num}'+'new.tfrecords')
+            writer = tf.io.TFRecordWriter(f'{self.save_dir}/test/'+f'{num}'+'new.tfrecords', options="GZIP")
         if val:
             self.get_ids(val=True)
             if not os.path.exists(f'{self.save_dir}/val/'):
                 os.makedirs(f'{self.save_dir}/val/')
-            writer = tf.io.TFRecordWriter(f'{self.save_dir}/val/'+f'{num}'+'new.tfrecords')
+            writer = tf.io.TFRecordWriter(f'{self.save_dir}/val/'+f'{num}'+'new.tfrecords', options="GZIP")
         
         if not (pred or val):
             if not os.path.exists(f'{self.save_dir}/train/'):
                 os.makedirs(f'{self.save_dir}/train/')
-            writer = tf.io.TFRecordWriter(f'{self.save_dir}/train/'+f'{num}'+'new.tfrecords')
+            writer = tf.io.TFRecordWriter(f'{self.save_dir}/train/'+f'{num}'+'new.tfrecords', options="GZIP")
         return writer
         
     def workflow(self,pred=False,val=False):
