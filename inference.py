@@ -2,31 +2,17 @@ import tensorflow as tf
 import numpy as np
 
 from tqdm import tqdm
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union
-
-from swinT import SwinTransformerEncoder , SwinTransformerDecoder,CFGS
-
-from loss import OGMFlow_loss , OGMFlow_loss2
 
 from waymo_open_dataset.protos import occupancy_flow_metrics_pb2
 from waymo_open_dataset.protos import occupancy_flow_submission_pb2
 
-from waymo_open_dataset.utils import occupancy_flow_data
 from waymo_open_dataset.utils import occupancy_flow_grids
-# from waymo_open_dataset.utils import occupancy_flow_metrics
-import occu_metric as occupancy_flow_metrics
 
 from google.protobuf import text_format
 
-import csv 
-
-import pathlib
 import os
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union
-import uuid
+from typing import Dict, List
 import zlib
-
-from metrics import OGMFlowMetrics,print_metrics
 
 layer = tf.keras.layers
 
@@ -56,11 +42,9 @@ agent_points_per_side_width: 16
 text_format.Parse(config_text, config)
 
 print(config)
-import os
 # Hyper parameters
 NUM_PRED_CHANNELS = 4
 
-from time import time
 
 TEST =True
 
@@ -138,9 +122,9 @@ def _apply_sigmoid_to_occupancy_logits(
 
 print('load_model...')
 
-from swinT import STrajNet
+from modules import STrajNet
 cfg=dict(input_size=(512,512), window_size=8, embed_dim=96, depths=[2,2,2], num_heads=[3,6,12])
-model = STrajNet(cfg,sep_actors=False)
+model = STrajNet(cfg,actor_only=True,sep_actors=False,fg_msa=True, fg=True)
 
 def test_step(data):
     map_img = data['map_image']
@@ -253,16 +237,16 @@ def _save_submission_to_file(
 
 def _make_test_dataset(test_shard_path: str) -> tf.data.Dataset:
   """Makes a dataset for one shard in the test set."""
-  test_dataset = tf.data.TFRecordDataset(test_shard_path)
+  test_dataset = tf.data.TFRecordDataset(test_shard_path, compression_type="GZIP")
   test_dataset = test_dataset.map(_parse_image_function_test)
   test_dataset = test_dataset.batch(1)
   return test_dataset
 
 def id_checking(test=True):
-    if val:
-            path = f'{args.ids_dir}/validation_scenario_ids.txt'
-    else:
+    if test:
         path = f'{args.ids_dir}/testing_scenario_ids.txt'
+    else:
+        path = f'{args.ids_dir}/validation_scenario_ids.txt'
 
     with tf.io.gfile.GFile(path) as f:
         test_scenario_ids = f.readlines()
@@ -272,7 +256,6 @@ def id_checking(test=True):
     return test_scenario_ids
 
 if __name__ == "__main__":
-    import glob
     import argparse
     parser = argparse.ArgumentParser(description='Inference')
     parser.add_argument('--ids_dir', type=str, help='ids.txt downloads from Waymos', default="./Waymo_Dataset/occupancy_flow_challenge/")
