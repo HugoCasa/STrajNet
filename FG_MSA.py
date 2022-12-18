@@ -55,6 +55,8 @@ class FGMSA(tf.keras.Model):
         if self.fg:
             self.conv_offset_proj2 = layers.Conv2D(out_dim, kernel_size=1,strides=1)
 
+        self.proj = layers.Dense(self.nc)
+
         self.proj_q = layers.Conv2D(self.nc,kernel_size=1, strides=1)
 
         self.proj_k = layers.Conv2D(self.nc,kernel_size=1, strides=1)
@@ -104,7 +106,7 @@ class FGMSA(tf.keras.Model):
         return ref
 
     def call(self, x,training=True,last_reference=None):
-
+        x = self.proj(x)
         B, H, W,C = x.get_shape().as_list()
         q = self.proj_q(x)
         offset = self._get_offset(q)
@@ -184,4 +186,5 @@ class FGMSA(tf.keras.Model):
 
 
 if __name__=='__main__':
-    FGMSA(q_size=(32,32), kv_size=(32,32), n_heads=8, n_head_channels=24,n_groups=8,in_dim=192,out_dim=192)
+    FGMSA(q_size=(16,16), kv_size=(16,16),n_heads=9,n_head_channels=48,n_groups=9,in_dim=384,out_dim=384,use_last_ref=False,fg=True)
+    # FGMSA(q_size=(32,32), kv_size=(32,32), n_heads=8, n_head_channels=24,n_groups=8,in_dim=192,out_dim=192)

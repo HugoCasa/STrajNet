@@ -3,6 +3,7 @@ import os
 # os.environ['CUDA_VISIBLE_DEVICE']='-1'
 import tensorflow as tf
 from tensorflow.keras.layers import Dense, Dropout, Conv2D, LayerNormalization, GlobalAveragePooling1D,UpSampling2D
+from trajPred import TrajPred
 
 
 CFGS = {
@@ -796,14 +797,17 @@ class STrajNet(tf.keras.Model):
         self.fg_msa = fg_msa
         self.fg = fg
         if fg_msa:
-            self.fg_msa_layer = FGMSA(q_size=(16,16), kv_size=(16,16),n_heads=8,n_head_channels=48,n_groups=8,out_dim=384,use_last_ref=False,fg=fg)
+            self.fg_msa_layer = FGMSA(q_size=(16,16), kv_size=(16,16),n_heads=9,n_head_channels=48,n_groups=9,in_dim=384,out_dim=384,use_last_ref=False,fg=fg)
+        
+        self.traj_pred = TrajPred()
+
         self.decoder = Pyramid3DDecoder(config=None,img_size=cfg['input_size'],use_pyramid=use_pyramid,timestep_split=True,
         shallow_decode=(4-len(cfg['depths'][:])),flow_sep_decode=True,conv_cnn=False)
 
         dummy_ogm =tf.zeros((1,)+cfg['input_size']+(11,2,))
         dummy_map =tf.zeros((1,)+(256,256)+(3,))
 
-        dummy_obs_actors = tf.zeros([1,48,11,8])
+        dummy_obs_actors = tf.concat([tf.random.uniform([1,24,11,8]),tf.zeros([1,24,11,8])], axis=1)
         dummy_occ_actors = tf.zeros([1,16,11,8])
         dummy_ccl = tf.zeros([1,256,10,7])
         dummy_flow =tf.zeros((1,)+cfg['input_size']+(2,))
@@ -824,19 +828,25 @@ class STrajNet(tf.keras.Model):
             res,pos,ref = self.fg_msa_layer(q,training=training)
             q = res + q
             q = tf.reshape(q,[-1,16*16,384])
-        query = tf.repeat(tf.expand_dims(q, axis=1),repeats=8,axis=1)
+        query = tf.repeat(tf.expand_dims(q, axis=1),repeats=9,axis=1) # change to 9 for traj
         if self.fg:
             # added Projected flow-features to each timestep
-            ref = tf.reshape(ref,[-1,8,256,384])
+            ref = tf.reshape(ref,[-1,9,256,384]) # change to 9 for traj
             query = ref + query
         
         #time-sep-cross attention and vector encoders:
-        obs_value = self.trajnet_attn(query,obs,occ,mapt,training)
+        obs_value, enc_trajs = self.trajnet_attn(query,obs,occ,mapt,training)
+
+        # trajectory prediction
+        scene = tf.reshape(obs_value[:, 8, :, :, :], [-1, 256, 384])
+        traj_preds_and_probs = self.traj_pred(scene, enc_trajs) 
 
         #fpn decoding:
-        y = self.decoder(obs_value,training,res_list)
+        y = self.decoder(obs_value[:, :8, :, :, :],training,res_list)
+        # y = self.decoder(obs_value, training, res_list)
         y = tf.reshape(tf.transpose(y, [0,2,3,1,4]),[-1,256,256,32])
-        return y
+
+        return y, traj_preds_and_probs
 
 
 def test_SwinT():
@@ -878,4 +888,11 @@ def SwinTransformer(model_name='swin_tiny_224', num_classes=1000, include_top=Tr
     return net
 
 if __name__=='__main__':
-    test_SwinT()
+    cfg=dict(input_size=(512,512), window_size=8, embed_dim=96, depths=[2,2,2], num_heads=[3,6,12])
+    model = STrajNet(cfg,actor_only=True,sep_actors=False, fg_msa=True)
+
+# if __name__=="__main__":
+#     use_pyramid=True
+#     cfg=dict(input_size=(512,512), window_size=8, embed_dim=96, depths=[2,2,2], num_heads=[3,6,12])
+#     Pyramid3DDecoder(config=None,img_size=cfg['input_size'],use_pyramid=use_pyramid,timestep_split=True,
+#         shallow_decode=(4-len(cfg['depths'][:])),flow_sep_decode=True,conv_cnn=False)

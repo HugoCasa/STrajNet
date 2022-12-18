@@ -253,8 +253,8 @@ class TrajNetCrossAttention(tf.keras.Model):
         if actor_only==False:
             self.map_encoder = MapEncoder(num_heads=traj_cfg['traj_heads'],out_dim=traj_cfg['out_dim'])
             self.map_norm = tf.keras.layers.LayerNormalization()
-            self.map_cross_attn = [Cross_AttentionT(num_heads=3, output_dim=pic_dim,key_dim=128,sep_actors=sep_actors) for _ in range(8)]
-        self.cross_attn_obs = [Cross_AttentionT(num_heads=3, output_dim=pic_dim,key_dim=128,sep_actors=sep_actors) for _ in range(8)]
+            self.map_cross_attn = [Cross_AttentionT(num_heads=3, output_dim=pic_dim,key_dim=128,sep_actors=sep_actors) for _ in range(9)] # change to 9
+        self.cross_attn_obs = [Cross_AttentionT(num_heads=3, output_dim=pic_dim,key_dim=128,sep_actors=sep_actors) for _ in range(9)] # change to 9
 
         dummy_obs_actors = tf.zeros([1,obs_actors,past_to_current_steps,8])
         dummy_occ_actors = tf.zeros([1,occ_actors,past_to_current_steps,8])
@@ -263,7 +263,7 @@ class TrajNetCrossAttention(tf.keras.Model):
         
         flow_pic_encode = tf.zeros((1,) + pic_size + (pic_dim,))
         if multi_modal:
-            dummy_pic_encode = tf.zeros((1,8,) + pic_size + (pic_dim,))
+            dummy_pic_encode = tf.zeros((1,9,) + pic_size + (pic_dim,)) # change to 9
 
         self(dummy_pic_encode,dummy_obs_actors,dummy_occ_actors,dummy_ccl,flow_pic_encode=flow_pic_encode)
         self.summary()
@@ -288,7 +288,7 @@ class TrajNetCrossAttention(tf.keras.Model):
         if self.sep_actors:
             actor_mask = tf.matmul(traj_mask[:, :, tf.newaxis], traj_mask[:, tf.newaxis, :])
         
-        flat_encode = tf.reshape(pic_encode, shape=[-1,8,self.H*self.W,self.pic_dim])
+        flat_encode = tf.reshape(pic_encode, shape=[-1,9,self.H*self.W,self.pic_dim]) # change to 9
         pic_mask = tf.ones_like(flat_encode[:,0,:,0],tf.int32)
 
 
@@ -302,7 +302,7 @@ class TrajNetCrossAttention(tf.keras.Model):
         query = flat_encode
         key = tf.concat([obs,occ], axis=1)
         res_list = []
-        for i in range(8):
+        for i in range(9): # change to 9
             if self.sep_actors:
                 o = self.cross_attn_obs[i](query[:,i],key,obs_attn_mask,training,actor_mask)
             else:
@@ -314,9 +314,9 @@ class TrajNetCrossAttention(tf.keras.Model):
             res_list.append(v)
             
         obs_value = tf.stack(res_list,axis=1)
-        obs_value = tf.reshape(obs_value, shape=[-1,8,self.H,self.W,self.pic_dim])
+        obs_value = tf.reshape(obs_value, shape=[-1,9,self.H,self.W,self.pic_dim]) # change to 9
 
-        return obs_value
+        return obs_value, tf.concat([obs, occ], axis=1)
 
 def test_emb():
     seg = tf.repeat([[1,0],[0,1]], repeats=[48,16],axis=0)
@@ -333,9 +333,29 @@ def testTrajC():
     model = TrajNetCrossAttention(cfg)
 
 if __name__=='__main__':
-    traj_cfg = dict(traj_heads=4,att_heads=6,out_dim=384,no_attn=False)
-    testTrajC()
+    # traj_cfg = dict(traj_heads=4,att_heads=6,out_dim=384,no_attn=False)
+    # testTrajC()
 
+    cfg=dict(input_size=(512,512), window_size=8, embed_dim=96, depths=[2,2,2], num_heads=[3,6,12])
+    sep_actors = False
+    actor_only = True
+    past_to_current_steps=11
+    obs_actors=48
+    occ_actors=16
+    if sep_actors:
+            traj_cfg = dict(traj_heads=4,att_heads=6,out_dim=384,no_attn=True)
+    else:
+        traj_cfg = dict(traj_heads=4,att_heads=6,out_dim=384,no_attn=False)
+    
+
+    # TrajNet(traj_cfg,no_attn=traj_cfg['no_attn'],
+    #         past_to_current_steps=past_to_current_steps,obs_actors=obs_actors,occ_actors=occ_actors,actor_only=actor_only,
+    #         double_net=False)
+        
+    resolution=[8,16,32]
+    hw = resolution[4-len(cfg['depths'][:])]
+    TrajNetCrossAttention(traj_cfg,actor_only=actor_only,pic_size=(hw,hw),pic_dim=768//(2**(4-len(cfg['depths'][:])))
+        ,multi_modal=True,sep_actors=sep_actors)
 
 
 
