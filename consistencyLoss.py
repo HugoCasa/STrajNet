@@ -23,11 +23,13 @@ ogm_config = []
 
 
 class ConsistencyLoss(tf.keras.losses.Loss):
-    def __init__(self, use_focal_loss = False, replica = 1):
+    def __init__(self, use_focal_loss = False, replica = 1, occ_weight = 1000.0, flow_weight = 1.0):
 
         self.use_focal_loss = use_focal_loss
         self.focal_loss = tfa.losses.SigmoidFocalCrossEntropy(from_logits=True)
         self.replica = replica
+        self.occ_weight = occ_weight
+        self.flow_weight = flow_weight
 
         a = tf.concat([tf.random.uniform([4, 48, 6, 8, 3]), tf.zeros([4,16,6,8,3])], axis=1)
 
@@ -48,7 +50,6 @@ class ConsistencyLoss(tf.keras.losses.Loss):
         gt_refs = tf.ones([4, 64, 4])
         gt_infos = tf.ones([4, 64, 3])
         loss_dict = self(dummy_preds, dummy_ogm_flow, dummy_gt, gt_masks, gt_refs, gt_infos)
-        print(loss_dict)
 
 
     def __call__(self, traj_preds_and_probs, ogm_flow: occupancy_flow_grids.WaypointGrids, gt_trajs, gt_masks, gt_refs, gt_infos):
@@ -136,10 +137,11 @@ class ConsistencyLoss(tf.keras.losses.Loss):
             loss_dict['occupancy'].append(
                 self._sigmoid_loss(
                     true_occupancy=trajs_occupancy[:, :, :, k],
-                    pred_occupancy=ogm)
+                    pred_occupancy=ogm,
+                    loss_weight=self.occ_weight)
             ) 
 
-            loss_dict['flow'].append(self._flow_loss(trajs_flow[:, :, :, k], flow))
+            loss_dict['flow'].append(self._flow_loss(trajs_flow[:, :, :, k], flow, loss_weight=self.flow_weight))
 
         n_dict = {}
         n_dict['occupancy'] = tf.math.add_n(loss_dict['occupancy']) / 8

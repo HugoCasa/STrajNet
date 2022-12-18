@@ -49,11 +49,12 @@ def min_ade(traj: tf.Tensor, traj_gt: tf.Tensor, masks: tf.Tensor) -> Tuple[tf.T
 
 
 class TrajLoss(tf.keras.losses.Loss):
-    def __init__(self, replica):
+    def __init__(self, replica, traj_weight):
         super().__init__()
         self.alpha = 1
         self.beta = 1
         self.replica = replica
+        self.traj_weight = traj_weight
 
         a = tf.concat([tf.random.uniform([4, 48, 6, 8, 3]), tf.zeros([4,16,6,8,3])], axis=1)
 
@@ -95,7 +96,7 @@ class TrajLoss(tf.keras.losses.Loss):
 
         loss = tf.reduce_mean(tf.boolean_mask(loss, valid_mask)) # (1)
 
-        return loss / self.replica
+        return self.traj_weight * loss / self.replica 
 
 
 if __name__ == "__main__":
