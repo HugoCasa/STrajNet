@@ -577,7 +577,7 @@ def rotate_all_from_inputs(
   occu_mask = tf.logical_and(psudo_occu_mask[:,:,0],tf.logical_not(in_box_mask))
   # print(in_box_mask.get_shape())
   vx, vy = rotate_points_around_origin(vx, vy, angle)
-  bbox_yaw = bbox_yaw #+ angle
+  bbox_yaw = bbox_yaw #+ angle # WHY do not normalize yaw ?
 
   actor_traj = tf.multiply(valid_indices,tf.concat([x,y,vx,vy,bbox_yaw], axis=-1))
 
