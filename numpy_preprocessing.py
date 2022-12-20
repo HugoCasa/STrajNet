@@ -365,26 +365,26 @@ class Processor(object):
         ped_byc_hist_flow = timestep_grids.pedestrians.all_flow[:,:,:,0,:] + timestep_grids.cyclists.all_flow[:,:,:,0,:]
         return vec_hist_flow[0].numpy(),ped_byc_hist_flow[0].numpy()
 
-    def build_saving_path(self,pred,val,sc_id):
+    def build_saving_path(self,pred,val,shard,sc_id):
         if pred:
             if not os.path.exists(f'{self.save_dir}/test_numpy/'):
                 os.makedirs(f'{self.save_dir}/test_numpy/')
-            path = f"{self.save_dir}/test_numpy/{sc_id}.npz"
+            path = f"{self.save_dir}/test_numpy/{shard}_{sc_id}.npz"
             
         if val:
             if not os.path.exists(f'{self.save_dir}/val_numpy/'):
                 os.makedirs(f'{self.save_dir}/val_numpy/')
-            path = f"{self.save_dir}/val_numpy/{sc_id}.npz"
+            path = f"{self.save_dir}/val_numpy/{shard}_{sc_id}.npz"
             
     
         if not (pred or val):
             if not os.path.exists(f'{self.save_dir}/train_numpy/'):
                 os.makedirs(f'{self.save_dir}/train_numpy/')
-            path = f"{self.save_dir}/train_numpy/{sc_id}.npz"
+            path = f"{self.save_dir}/train_numpy/{shard}_{sc_id}.npz"
             
         return path
         
-    def workflow(self,pred=False,val=False):
+    def workflow(self, pred=False,val=False):
         i = 0
         self.pbar = tqdm(total=self.dataset_length)
 
@@ -392,6 +392,8 @@ class Processor(object):
             self.get_ids(val=False)
         elif val:
             self.get_ids(val=True)
+
+        shard = self.filename.split('-')[1]
         
         for dataframe in self.datalist:
             sc_id = dataframe['scenario/id'].numpy()[0]
@@ -431,7 +433,7 @@ class Processor(object):
                 feature['gt_flow'] = gt_flow
                 feature['origin_flow'] = gt_origin_flow
 
-            path = self.build_saving_path(pred, val, sc_id=sc_id)
+            path = self.build_saving_path(pred, val, shard, sc_id)
 
             np.savez_compressed(path, **feature)
 
