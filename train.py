@@ -62,6 +62,8 @@ EPOCH = args.epochs
 LR = args.lr
 SAVE_DIR = args.save_dir
 
+traj_pred = True # whether to predict trajectories
+
 import os
 if not os.path.exists(SAVE_DIR):
     os.mkdir(SAVE_DIR)
@@ -81,14 +83,14 @@ feature_traj = {
     'gt_flow': tf.io.FixedLenFeature([], tf.string),
     'origin_flow': tf.io.FixedLenFeature([], tf.string),
     'vec_flow':tf.io.FixedLenFeature([], tf.string),
-    'gt_trajs':tf.io.FixedLenFeature([], tf.string),
-    'gt_masks':tf.io.FixedLenFeature([], tf.string),
-    'gt_refs':tf.io.FixedLenFeature([], tf.string),
-    'gt_infos':tf.io.FixedLenFeature([], tf.string),
+    'gt_trajs':tf.io.FixedLenFeature([], tf.string, ""),
+    'gt_masks':tf.io.FixedLenFeature([], tf.string, ""),
+    'gt_refs':tf.io.FixedLenFeature([], tf.string, ""),
+    'gt_infos':tf.io.FixedLenFeature([], tf.string, ""),
     # 'byc_flow':tf.io.FixedLenFeature([], tf.string)
 }
 
-def _parse_image_function_traj(example_proto):
+def _parse_image_function_traj(example_proto, with_traj = True):
     # Parse the input tf.Example proto using the dictionary above.
     new_dict = {}
     d =  tf.io.parse_single_example(example_proto, feature_traj)
@@ -107,6 +109,7 @@ def _parse_image_function_traj(example_proto):
     new_dict['map_image'] = tf.cast(tf.reshape(tf.io.decode_raw(d['map_image'],tf.int8),[256,256,3]),tf.float32) / 256
     new_dict['vec_flow'] = tf.reshape(tf.io.decode_raw(d['vec_flow'],tf.float32),[512,512,2])
 
+    if with_traj:
     new_dict['gt_trajs'] = tf.cast(tf.reshape(tf.io.decode_raw(d['gt_trajs'],tf.float64),[64,8,3]),tf.float32)
     new_dict['gt_masks'] = tf.cast(tf.reshape(tf.io.decode_raw(d['gt_masks'],tf.float64),[64,8]),tf.float32)
     new_dict['gt_refs'] = tf.cast(tf.reshape(tf.io.decode_raw(d['gt_refs'],tf.float64),[64,4]),tf.float32)
@@ -172,6 +175,7 @@ with strategy.scope():
     train_loss_occ = tf.keras.metrics.Mean(name='train_loss_occ')
     train_loss_flow = tf.keras.metrics.Mean(name='train_loss_flow')
     train_loss_warp = tf.keras.metrics.Mean(name='train_loss_wp')
+    if traj_pred:
     train_loss_traj = tf.keras.metrics.Mean(name='train_loss_traj')
     train_loss_consist_occ = tf.keras.metrics.Mean(name='train_loss_consist_occ')
     train_loss_consist_flow = tf.keras.metrics.Mean(name='train_loss_consist_flow')
@@ -180,6 +184,7 @@ with strategy.scope():
     valid_loss_occ = tf.keras.metrics.Mean(name='valid_loss_occ')
     valid_loss_flow = tf.keras.metrics.Mean(name='valid_loss_flow')
     valid_loss_warp = tf.keras.metrics.Mean(name='valid_loss_wp')
+    if traj_pred:
     valid_loss_traj = tf.keras.metrics.Mean(name='valid_loss_traj')
     valid_loss_consist_occ = tf.keras.metrics.Mean(name='valid_loss_consist_occ')
     valid_loss_consist_flow = tf.keras.metrics.Mean(name='valid_loss_consist_flow')
@@ -210,9 +215,10 @@ flow_weight = 1.0
 traj_weight = 1.0
 
 with strategy.scope():
-    model = STrajNet(cfg,actor_only=True,sep_actors=False, fg_msa=True, fg=True)
+    model = STrajNet(cfg,actor_only=True,sep_actors=False, fg_msa=True, fg=True, traj_pred=traj_pred)
     loss_fn = OGMFlow_loss(config,replica=REPLICA,no_use_warp=False,use_pred=False,use_gt=True,
     ogm_weight=ogm_weight, occ_weight=occ_weight,flow_origin_weight=flow_origin_weight,flow_weight=flow_weight,use_focal_loss=False)
+    if traj_pred:
     traj_loss_fn = TrajLoss(replica=REPLICA, traj_weight=traj_weight)
     consist_loss_fn = ConsistencyLoss(use_focal_loss=False, replica=REPLICA, occ_weight=occ_weight, flow_weight=flow_weight)
     optimizer = tf.keras.optimizers.Nadam(learning_rate=LR) 
@@ -233,6 +239,7 @@ def train_step(data):
 
     flow = data['vec_flow']
 
+    if traj_pred:
     gt_trajs = data['gt_trajs']
     gt_masks = data['gt_masks']
     gt_refs = data['gt_refs']
@@ -244,9 +251,10 @@ def train_step(data):
         outputs, traj_preds_and_probs = model(ogm,map_img,training=True,obs=actors,occ=occl_actors,mapt=centerlines,flow=flow)
         logits = _get_pred_waypoint_logits(outputs)
         loss_dict = loss_fn(true_waypoints=true_waypoints,pred_waypoint_logits=logits,curr_ogm=ogm[:,:,:,-1,0])
+        loss_value = tf.math.add_n(loss_dict.values())
+        if traj_pred:
         traj_loss = traj_loss_fn(traj_preds_and_probs, gt_trajs, gt_masks)
         consist_loss = consist_loss_fn(traj_preds_and_probs, logits, gt_trajs, gt_masks, gt_refs, gt_infos)
-        loss_value = tf.math.add_n(loss_dict.values())
         loss_value += traj_loss
         loss_value += tf.math.add_n(consist_loss.values())
 
@@ -257,6 +265,7 @@ def train_step(data):
     train_loss_occ.update_state(loss_dict['occluded_xe']*REPLICA)
     train_loss_flow.update_state(loss_dict['flow']*REPLICA)
     train_loss_warp.update_state(loss_dict['flow_warp_xe']*REPLICA)
+    if traj_pred:
     train_loss_traj.update_state(traj_loss*REPLICA)
     train_loss_consist_occ.update_state(consist_loss['occupancy']*REPLICA)
     train_loss_consist_flow.update_state(consist_loss['flow']*REPLICA)
@@ -297,6 +306,7 @@ def val_step(data):
 
     flow = data['vec_flow']
 
+    if traj_pred:
     gt_trajs = data['gt_trajs']
     gt_masks = data['gt_masks']
     gt_refs = data['gt_refs']
@@ -306,7 +316,7 @@ def val_step(data):
 
     outputs, traj_preds_and_probs = model(ogm,map_img,training=False,obs=actors,occ=occl_actors,mapt=centerlines,flow=flow)
     logits = _get_pred_waypoint_logits(outputs)
-
+    if traj_pred:
     traj_loss = traj_loss_fn(traj_preds_and_probs, gt_trajs, gt_masks)
     consist_loss = consist_loss_fn(traj_preds_and_probs, logits, gt_trajs, gt_masks, gt_refs, gt_infos)
     
@@ -317,6 +327,8 @@ def val_step(data):
     valid_loss_occ.update_state(loss_dict['occluded_xe']*REPLICA)
     valid_loss_flow.update_state(loss_dict['flow']*REPLICA)
     valid_loss_warp.update_state(loss_dict['flow_warp_xe']*REPLICA)
+    
+    if traj_pred:
     valid_loss_traj.update_state(traj_loss*REPLICA)
     valid_loss_consist_occ.update_state(consist_loss['occupancy']*REPLICA)
     valid_loss_consist_flow.update_state(consist_loss['flow']*REPLICA)
@@ -353,30 +365,43 @@ def model_training(train_dataset, valid_dataset, epochs,continue_ep=0):
         
         print("\nepoch {}/{}".format(epoch+1, epochs))
         
-        progBar = tf.keras.utils.Progbar(training_samples, stateful_metrics=['obs_loss','occ_loss','flow_loss','warp_loss', 'traj_loss', 'consist_loss_occ', 'consist_loss_flow'], unit_name='sample')
-        vprogBar = tf.keras.utils.Progbar(val_samples, stateful_metrics=['obs_loss','occ_loss','flow_loss','warp_loss',
-        'epe','obs_auc','occ_auc','traj_loss', 'consist_loss_occ', 'consist_loss_flow','flowogm_auc'], unit_name='sample')
+        metrics = ['obs_loss','occ_loss','flow_loss','warp_loss']
+        v_metrics = ['obs_loss','occ_loss','flow_loss','warp_loss','epe','obs_auc','occ_auc', 'flowogm_auc']
+        if traj_pred:
+            traj_metrics = ['traj_loss', 'consist_loss_occ', 'consist_loss_flow']
+            metrics += traj_metrics
+            v_metrics += traj_metrics
+        progBar = tf.keras.utils.Progbar(training_samples, stateful_metrics=metrics, unit_name='sample')
+        vprogBar = tf.keras.utils.Progbar(val_samples, stateful_metrics=v_metrics, unit_name='sample')
 
         # Iterate over the batches of the training dataset.
         for step, batch in enumerate(train_dataset):
             training_samples = (step+1) * BATCH_SIZE
             outputs = strategy.run(train_step,args=(batch,))
-            progBar.update((step+1) * BATCH_SIZE, values=[('obs_loss', train_loss.result()/ogm_weight),('occ_loss', train_loss_occ.result()/occ_weight),
+            values = [('obs_loss', train_loss.result()/ogm_weight),('occ_loss', train_loss_occ.result()/occ_weight),
             ('flow_loss', train_loss_flow.result()/flow_weight),('warp_loss', train_loss_warp.result()/flow_origin_weight),
-            ('traj_loss', train_loss_traj.result()/traj_weight),('consist_loss_occ', train_loss_consist_occ.result()/occ_weight),
-            ('consist_loss_flow', train_loss_consist_flow.result()/flow_weight)])
+            ]
+            if traj_pred:
+                traj_values = [('traj_loss', train_loss_traj.result()/traj_weight),('consist_loss_occ', train_loss_consist_occ.result()/occ_weight),
+                                ('consist_loss_flow', train_loss_consist_flow.result()/flow_weight)]
+                values += traj_values
+            progBar.update((step+1) * BATCH_SIZE, values=values)
 
         # Iterate over the batches of the validation dataset. 
         if valid_dataset is not None:
             for step, batch in enumerate(valid_dataset):
                 val_samples = (step+1) * BATCH_SIZE
                 strategy.run(val_step,args=(batch,))
-                vprogBar.update((step+1) * BATCH_SIZE, values=[
+                values = [
                     ('obs_loss', valid_loss.result()/ogm_weight),('occ_loss',valid_loss_occ.result()/occ_weight),
                     ('flow_loss', valid_loss_flow.result()/flow_weight),('warp_loss', valid_loss_warp.result()/flow_origin_weight),
-                    ('traj_loss', valid_loss_traj.result()/traj_weight),('consist_loss_occ', valid_loss_consist_occ.result()/occ_weight),
-                    ('consist_loss_flow', valid_loss_consist_flow.result()/flow_weight), ('flowogm_auc',valid_metrics.flow_ogm_auc.result())
-                ])
+                    ('flowogm_auc',valid_metrics.flow_ogm_auc.result())
+                ]
+                if traj_pred:
+                    traj_values = [('traj_loss', valid_loss_traj.result()/traj_weight),('consist_loss_occ', valid_loss_consist_occ.result()/occ_weight),
+                        ('consist_loss_flow', valid_loss_consist_flow.result()/flow_weight)]
+                    values += traj_values
+                vprogBar.update((step+1) * BATCH_SIZE, values=values)
 
             # Display metrics at the end of testing.
             val_res_dict = valid_metrics.get_result()

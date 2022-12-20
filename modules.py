@@ -777,7 +777,7 @@ from FG_MSA import FGMSA
 
 class STrajNet(tf.keras.Model):
     def __init__(self,cfg,model_name='STrajNet',use_pyramid=True,actor_only=True,sep_actors=False,
-        fg_msa=False,use_last_ref=False,fg=False,large_ogm=True):
+        fg_msa=False,use_last_ref=False,fg=False,large_ogm=True,traj_pred=True):
         super().__init__(name=model_name)
 
         self.encoder = SwinTransformerEncoder(include_top=True,img_size=cfg['input_size'], window_size=cfg[
@@ -792,14 +792,18 @@ class STrajNet(tf.keras.Model):
         
         resolution=[8,16,32]
         hw = resolution[4-len(cfg['depths'][:])]
-        self.trajnet_attn = TrajNetCrossAttention(traj_cfg,actor_only=actor_only,pic_size=(hw,hw),pic_dim=768//(2**(4-len(cfg['depths'][:])))
-        ,multi_modal=True,sep_actors=sep_actors)
+        self.trajnet_attn = TrajNetCrossAttention(traj_cfg,actor_only=actor_only,pic_size=(hw,hw),pic_dim=768//(2**(4-len(cfg['depths'][:]))),
+            multi_modal=True,sep_actors=sep_actors, traj_pred=traj_pred)
         self.fg_msa = fg_msa
         self.fg = fg
+        self.traj_pred = traj_pred
+        self.repeats = 9 if traj_pred else 8 # needs 9 groups/heads for trajectory prediction
+
         if fg_msa:
-            self.fg_msa_layer = FGMSA(q_size=(16,16), kv_size=(16,16),n_heads=9,n_head_channels=48,n_groups=9,in_dim=384,out_dim=384,use_last_ref=False,fg=fg)
-        
-        self.traj_pred = TrajPred()
+            self.fg_msa_layer = FGMSA(q_size=(16,16), kv_size=(16,16),n_heads=self.repeats,n_head_channels=48,n_groups=self.repeats,in_dim=384,out_dim=384,use_last_ref=False,fg=fg)
+
+        if traj_pred:
+            self.traj_pred_layer = TrajPred()
 
         self.decoder = Pyramid3DDecoder(config=None,img_size=cfg['input_size'],use_pyramid=use_pyramid,timestep_split=True,
         shallow_decode=(4-len(cfg['depths'][:])),flow_sep_decode=True,conv_cnn=False)
@@ -828,22 +832,23 @@ class STrajNet(tf.keras.Model):
             res,pos,ref = self.fg_msa_layer(q,training=training)
             q = res + q
             q = tf.reshape(q,[-1,16*16,384])
-        query = tf.repeat(tf.expand_dims(q, axis=1),repeats=9,axis=1) # change to 9 for traj
+        query = tf.repeat(tf.expand_dims(q, axis=1),repeats=self.repeats,axis=1)
         if self.fg:
             # added Projected flow-features to each timestep
-            ref = tf.reshape(ref,[-1,9,256,384]) # change to 9 for traj
+            ref = tf.reshape(ref,[-1,self.repeats,256,384])
             query = ref + query
         
         #time-sep-cross attention and vector encoders:
         obs_value, enc_trajs = self.trajnet_attn(query,obs,occ,mapt,training)
 
-        # trajectory prediction
-        scene = tf.reshape(obs_value[:, 8, :, :, :], [-1, 256, 384])
-        traj_preds_and_probs = self.traj_pred(scene, enc_trajs) 
+        traj_preds_and_probs = None
+        if self.traj_pred:
+            # trajectory prediction
+            scene = tf.reshape(obs_value[:, 8, :, :, :], [-1, 256, 384])
+            traj_preds_and_probs = self.traj_pred_layer(scene, enc_trajs)
 
         #fpn decoding:
         y = self.decoder(obs_value[:, :8, :, :, :],training,res_list)
-        # y = self.decoder(obs_value, training, res_list)
         y = tf.reshape(tf.transpose(y, [0,2,3,1,4]),[-1,256,256,32])
 
         return y, traj_preds_and_probs
