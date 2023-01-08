@@ -3,7 +3,9 @@ from typing import Tuple
 import numpy as np
 
 def torch_gather(x, indices, gather_axis):
-
+    """
+    Torch implementation of tensorflow gather
+    """
     all_indices = tf.where(tf.fill(indices.shape, True))
     gather_locations = tf.reshape(indices, [indices.shape.num_elements()])
 
@@ -49,6 +51,10 @@ def min_ade(traj: tf.Tensor, traj_gt: tf.Tensor, masks: tf.Tensor) -> Tuple[tf.T
 
 
 class TrajLoss(tf.keras.losses.Loss):
+    """
+    Trajectory loss
+    Average displacement error of the predicted trajectory closest to the ground truth + classification error
+    """
     def __init__(self, replica, traj_weight):
         super().__init__()
         self.alpha = 1

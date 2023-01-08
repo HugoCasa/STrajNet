@@ -23,6 +23,10 @@ ogm_config = []
 
 
 class ConsistencyLoss(tf.keras.losses.Loss):
+    """
+    Consistency loss between grid and trajectory predictions
+    Generate occupancy and flow grids from predicted trajectories and compute cross-entropy + flow loss between generated and predicted grids
+    """
     def __init__(self, use_focal_loss = False, replica = 1, occ_weight = 1000.0, flow_weight = 1.0):
 
         self.use_focal_loss = use_focal_loss
@@ -119,7 +123,7 @@ class ConsistencyLoss(tf.keras.losses.Loss):
         }
         trajs_flow = render_flow_from_inputs(flow_inputs, config) # (B, 256, 256, 8, 2)
 
-        # compare to predicted
+        # compute cross-entropy and flow loss between generated and predicted grids
 
         loss_dict = {
             'occupancy': [],

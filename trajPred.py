@@ -59,7 +59,6 @@ class Attention(Layer):
         self.attend = nn.Softmax()
         self.to_q = nn.Dense(units=inner_dim, use_bias=False)
         self.to_kv = nn.Dense(units=inner_dim * 2, use_bias=False)
-        # self.to_qkv = nn.Dense(units=inner_dim * 3, use_bias=False)
 
         if project_out:
             self.to_out = [
@@ -108,6 +107,9 @@ class Transformer(Layer):
         return x
 
 class TrajPred(tf.keras.Model):
+    """
+    Trajectory prediction module
+    """
     def __init__(self):
         super(TrajPred, self).__init__()
 
@@ -134,30 +136,30 @@ class TrajPred(tf.keras.Model):
 
         num_patches = (image_height // patch_height) * (image_width // patch_width)
 
+        # patching and positional embedding
         self.patch_embedding = Sequential([
             Rearrange('b (h p1) (w p2) -> b (h w) (p1 p2)', p1=patch_height, p2=patch_width),
             nn.Dense(units=dim)
         ], name='patch_embedding')
-
         self.pos_embedding = tf.Variable(initial_value=tf.random.normal([1, num_patches + 1, dim]))
         self.cls_token = tf.Variable(initial_value=tf.random.normal([1, 1, dim]))
         self.dropout = nn.Dropout(rate=emb_dropout)
 
+        # latents for multimodality
         self.latents = tf.Variable(initial_value=tf.random.normal([1, 1, 6, dim]))
         self.modes_head = Sequential([
             nn.LayerNormalization(),
             nn.Dense(units=dim)
         ], name='modes_head')
 
-
+        # transformer
         self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout)
 
+        # final head
         self.mlp_head = Sequential([
             nn.LayerNormalization(),
             nn.Dense(units=num_classes)
         ], name='mlp_head')
-
-
 
         dummy_scene = tf.random.uniform([1,256,384])
         dummy_trajs = tf.random.uniform([1,64,384])
@@ -165,12 +167,12 @@ class TrajPred(tf.keras.Model):
         self.summary()
 
     def call(self, scene, trajs, training=True):
-        # scene shape: (B, 256, 384)
+        # scene: (B, 256, 384)
         # trajs: (B, 64, 384)
         # out: (B, 64, 6, 8, 2)
         # and (B, 64, 6)
 
-        # keys & values: positional encoding
+        # patching and positional embedding of the scene
         scene = self.patch_embedding(scene) # (B, 384, 384)
         B, N, D = scene.shape
 
@@ -179,6 +181,7 @@ class TrajPred(tf.keras.Model):
         scene += self.pos_embedding[:, :(N + 1)]
         scene = self.dropout(scene, training=training)
 
+        # concat latents to encoded trajectories
         B, N, D = trajs.shape
         x = tf.repeat(trajs[:, :, tf.newaxis, :], repeats=6, axis=2) # (B, 64, 6, 384)
         latents = tf.tile(self.latents, [B, N, 1, 1]) # (B, 64, 6, 384)
@@ -187,11 +190,14 @@ class TrajPred(tf.keras.Model):
         x = self.modes_head(x) # (B, 64, 6, 384)
         x = tf.reshape(x, [-1, 64 * 6, 384]) # (B, 384, 384)
 
-
+        # apply transformer
+        # use encoded trajectories as query and the scene as keys/values
         x = self.transformer(x, scene, training=training) # (B, 384, 384)
 
+        # final layer
         x = self.mlp_head(x) # (B, 384, 25)
 
+        # reshape into trajectory predictions and associated probabilities
         x = tf.reshape(x, [-1, N, 6, 25]) # (B, 64, 6, 25)
 
         preds = x[:,:,:,:24] # (B, 64, 6, 24)
