@@ -44,6 +44,7 @@ text_format.Parse(config_text, config)
 print(config)
 # Hyper parameters
 NUM_PRED_CHANNELS = 4
+traj_pred = True
 
 
 TEST =True
@@ -124,7 +125,7 @@ print('load_model...')
 
 from modules import STrajNet
 cfg=dict(input_size=(512,512), window_size=8, embed_dim=96, depths=[2,2,2], num_heads=[3,6,12])
-model = STrajNet(cfg,actor_only=True,sep_actors=False,fg_msa=True, fg=True)
+model = STrajNet(cfg,actor_only=True,sep_actors=False,fg_msa=True, fg=True, traj_pred=traj_pred)
 
 def test_step(data):
     map_img = data['map_image']
@@ -134,7 +135,7 @@ def test_step(data):
     ogm = data['ogm']
     flow = data['vec_flow']
 
-    outputs = model(ogm,map_img,training=False,obs=actors,occ=occl_actors,mapt=centerlines,flow=flow)
+    outputs, _ = model(ogm,map_img,training=False,obs=actors,occ=occl_actors,mapt=centerlines,flow=flow)
     logits = _get_pred_waypoint_logits(outputs)
     
     pred_waypoints = _apply_sigmoid_to_occupancy_logits(logits)
